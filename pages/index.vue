@@ -96,6 +96,14 @@
             v-if="firstOccurrenceSoldOutIds.has(item.sold_out_id)"
             class="mt-3 border-t border-gray-100 pt-3"
           >
+            <!-- Financial estimate -->
+            <p
+              v-if="merchantRecommendation(item).recommendation === 'review'"
+              class="text-xs text-gray-400 mb-2"
+            >
+              Estimate unavailable — financial inputs not provided by sandbox.
+            </p>
+
             <!-- Edit form -->
             <template v-if="editingMerchantId === item.merchant_id">
               <p class="text-xs text-gray-500 mb-1.5">
@@ -181,7 +189,9 @@
 </template>
 
 <script setup lang="ts">
-import type { SoldOutsTodayResponse, MarksResponse, Mark } from '~/server/utils/sandbox'
+import type { SoldOutsTodayResponse, MarksResponse, Mark, TodaySoldOut } from '~/server/utils/sandbox'
+import { getRecommendation } from '~/utils/finance'
+import type { ScenarioResult } from '~/utils/finance'
 
 const { data, pending, error } = await useFetch<SoldOutsTodayResponse>('/api/soldouts/today')
 const { data: marksData, refresh: refreshMarks } = await useFetch<MarksResponse>('/api/marks')
@@ -206,6 +216,33 @@ const firstOccurrenceSoldOutIds = computed(() => {
   }
   return result
 })
+
+// Financial estimates: sandbox does not supply the required inputs (GP per voucher,
+// attribution factor, rep cost, refund data). All scenarios are incomplete — the
+// recommendation engine falls through to rule 3 (missing inputs → review) for
+// merchants without a DNC/no_call restriction. Rule 1 still fires for DNC/no_call.
+const unavailableScenario: ScenarioResult = {
+  repTimeCostPence: null,
+  provisionalIncrementalGPPence: null,
+  netExpectedGPPence: null,
+  isComplete: false,
+  missingInputs: ['financial inputs not provided by sandbox'],
+  warnings: [],
+  errors: [],
+}
+
+function merchantRecommendation(item: TodaySoldOut) {
+  return getRecommendation({
+    hasNoCallMark: marksMap.value.has(item.merchant_id),
+    hasDoNotContact: item.do_not_contact,
+    hasActiveAutoReplenish: null,
+    financialResults: {
+      low: unavailableScenario,
+      base: unavailableScenario,
+      high: unavailableScenario,
+    },
+  })
+}
 
 const editingMerchantId = ref<string | null>(null)
 const editReason = ref('')

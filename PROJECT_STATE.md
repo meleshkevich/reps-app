@@ -390,6 +390,129 @@ Added `Marked by: <value>` line below the reason in the existing-mark section of
 
 ---
 
+---
+
+## T5 — Deterministic Financial Engine
+
+**Status:** Complete ✅
+
+### Files Created or Modified
+
+| File | Purpose |
+|---|---|
+| `utils/finance.ts` | Pure financial calculation module — no Nuxt/API/LLM deps |
+| `tests/finance.test.ts` | 48 tests: arithmetic, scenarios, missing inputs, validation, recommendation rules |
+| `pages/index.vue` | Added `merchantRecommendation()` and "Estimate unavailable" display |
+
+### Implemented Formulas
+
+```
+Rep time cost (pence) = round( expectedCallMinutes / 60 × repHourlyCostPence )
+
+Provisional incremental GP (pence) = round( expectedAdditionalVouchers
+                                           × gpPerAdditionalVoucherPence
+                                           × attributionFactor )
+
+Net expected GP (pence) = provisionalIncrementalGP
+                        − repTimeCost
+                        − additionalRefundAdjustmentPence
+```
+
+**Rounding rule:** A single `Math.round` is applied at the end of each sub-expression involving division or multiplication by a non-integer. Integer additions/subtractions are exact.
+
+**Label:** Estimates are advisory scenario-based projections. The incremental GP formula is a modeling assumption, not a validated causal relationship. Historical GP averages are observational inputs, not measured lift.
+
+### Recommendation Decision Logic (priority order)
+
+| Rule | Condition | Outcome |
+|---|---|---|
+| 1 | `hasNoCallMark` or `hasDoNotContact` | `dont_bother` |
+| 2 | `hasActiveAutoReplenish === true` or `=== null` (confirmed active or unknown) | `review` (verify schedule / status unknown) |
+| 3 | Any scenario incomplete (missing inputs) | `review` (estimate unavailable) |
+| 4 | All complete and `low.netGP > 0` | `call` |
+| 5 | All complete and `high.netGP <= 0` | `dont_bother` |
+| 6 | Otherwise (range crosses zero) | `review` |
+
+All recommendations carry `isAdvisoryOnly: true`. They do not modify routing or automation state.
+
+### Validation Results (T5)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 121/121 passed (7 test files, 48 new finance tests) |
+| `npm run build` | ✅ Success |
+
+### Available vs Missing Business Inputs
+
+The sandbox provides historical financial and operational data including GP, vouchers sold, refunds, activity logs, and automation schedules. However, the currently implemented dashboard does not retrieve or derive all inputs required for a defensible incremental GP estimate. Historical GP averages or sold-out-day differences must not be used as causal lift coefficients.
+
+| Input | Sandbox has data? | Retrieved by dashboard? |
+|---|---|---|
+| `do_not_contact` (DNC flag) | ✅ `TodaySoldOut.do_not_contact` | ✅ Yes |
+| `no_call` mark | ✅ `GET /marks` | ✅ Yes |
+| `expectedAdditionalVouchers` | ⚠️ Derivable from historical voucher data | ❌ Not fetched |
+| `gpPerAdditionalVoucherPence` | ⚠️ Derivable from historical GP data | ❌ Not fetched |
+| `attributionFactor` | ❌ Model assumption — not in sandbox | ❌ Not applicable |
+| `expectedCallMinutes` | ❌ Rep experience — not in sandbox | ❌ Not applicable |
+| `repHourlyCostPence` | ❌ Business config — not in sandbox | ❌ Not applicable |
+| `additionalRefundAdjustmentPence` | ⚠️ Derivable from refund/activity data | ❌ Not fetched |
+| `hasActiveAutoReplenish` | ⚠️ Automation schedules endpoint exists | ❌ Not fetched — passed as `null` |
+
+**Consequence:** All merchants without DNC/no_call status display "Estimate unavailable — financial inputs not provided by sandbox." DNC/no_call merchants still receive `dont_bother` from rule 1. Unknown auto-replenish status (`null`) triggers rule 2 → `review` for all remaining merchants.
+
+### Assumptions and Provenance Handling
+
+- Each `ScenarioInputs` carries `assumptionSource` (`sandbox | historical_estimate | manual_assumption`), `assumptionsVersion` (non-empty string), and `warnings[]`.
+- Both `additionalRefundAdjustmentPence` and `refundAccountingBasis` must be explicitly provided — `null` is not silently treated as zero.
+- Missing refund inputs add a warning and mark the scenario incomplete (never silently zero-filled).
+- `validateScenarioInputs` enforces non-negative monetary values, attribution factor bounds [0,1], cap increase constraint, and valid provenance metadata.
+
+### Deliberate Scope Cuts / Known Limitations
+
+- **No financial input forms**: required by T5 constraints. Inputs would need to come from a future configuration source.
+- **Unknown `hasActiveAutoReplenish`**: automation schedule status is not fetched from the sandbox. Passed as `null` (unknown) → rule 2 fires as `review` with "status unknown" reason for all merchants without DNC/no_call restriction. Rule 1 still takes priority.
+- **No net GP display**: all estimates are "unavailable" (dashboard shows the message rather than a £ figure).
+- **Historical GP figures excluded**: Priya's £11.08, £14.67, £1.58 differences are not used anywhere in the engine per the explicit safeguard requirement.
+- **Sandbox data not fully exploited**: Historical voucher counts, GP data, and refund history exist in the sandbox but are not retrieved. Derivation would require domain assumptions (e.g. attribution factor, call duration) not supplied by the sandbox itself.
+
+---
+
+---
+
+## T5 — Final Corrections: Unknown Automation Status and Data Availability
+
+**Status:** Complete ✅
+
+### Changes
+
+**1. Unknown auto-replenish status**
+
+`RecommendationContext.hasActiveAutoReplenish` changed from `boolean` to `boolean | null`:
+- `true` — confirmed active schedule → `review`
+- `false` — confirmed inactive → continue financial evaluation
+- `null` — status not fetched / unknown → `review` ("status unknown")
+
+Rule 1 (restriction) still takes priority over all auto-replenish states.
+
+Dashboard now passes `null` (was `false`) since the schedules API is not fetched.
+
+**2. Data availability documentation**
+
+PROJECT_STATE.md corrected: the sandbox provides historical financial and operational data (GP, vouchers, refunds, activities, automation schedules). The dashboard does not retrieve or derive these inputs — not because the sandbox lacks the data, but because derivation requires domain assumptions (attribution factor, call duration, rep cost) that the sandbox does not supply.
+
+### Validation Results (T5 Corrections)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 124/124 passed (3 new tests: null auto-replenish, rule 1 overrides null, false bypasses rule 2) |
+| `npm run build` | ✅ Success |
+
+---
+
 ## Next Task
 
 **T4** — pending explicit approval.
