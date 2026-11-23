@@ -181,6 +181,80 @@ This gives `@nuxtjs/tailwindcss` a project-owned CSS file to resolve:
 
 ---
 
+---
+
+## T2 — Groupon Sandbox API Integration
+
+**Status:** Complete ✅
+
+### Files Created or Modified
+
+| File | Purpose |
+|---|---|
+| `server/utils/sandbox.ts` | Typed sandbox API client: `sandboxFetch`, `getSoldoutsToday`, `getMerchants`, `getMerchantDeals`, `SandboxApiError` |
+| `server/api/soldouts/today.get.ts` | `GET /api/soldouts/today` — proxies sandbox, auth-protected |
+| `server/api/merchants/index.get.ts` | `GET /api/merchants` — proxies sandbox, auth-protected |
+| `server/api/deals/index.get.ts` | `GET /api/deals?merchant_id=…` — proxies sandbox, auth-protected |
+| `pages/index.vue` | Today's sold-outs page with loading/empty/error states |
+| `tests/sandbox.test.ts` | 18 tests: auth header, success, pagination, HTTP errors, timeouts, missing key, endpoint auth |
+
+### Confirmed API Response Schemas
+
+Schemas verified against live sandbox responses:
+
+**`TodaySoldOut`**: `sold_out_id`, `restock_task_id`, `deal_id`, `deal_name`, `merchant_id`, `merchant_name`, `category`, `region`, `city`, `size_band`, `rep_id`, `rep_name`, `do_not_contact` (bool), `cap`, `sold_out_at` (datetime), `team_time`, `world_day`, `posted_in_channel` (bool)
+
+**`Merchant`**: `merchant_id`, `merchant_name`, `category`, `region`, `city`, `size_band`, `rep_id`, `rep_name` (nullable), `joined`, `do_not_contact` (bool)
+
+**`Deal`**: `deal_id`, `merchant_id`, `sold_out_count`, `first_sold_out` (nullable), `last_sold_out` (nullable), `last_cap` (nullable)
+
+**`SoldOutsTodayResponse`** wraps `TodaySoldOut[]` with `world_day`, `date`, `team_time`, `next_cursor`, `total`.
+
+**Pagination**: `data`, `next_cursor` (string | null), `total` — all three endpoints verified.
+
+### Architecture
+
+- **API client** (`server/utils/sandbox.ts`): uses native Node.js `fetch` with 10 s `AbortController` timeout. Reads `GROUPON_API_KEY` from server env only. Throws typed `SandboxApiError(status, message)` on HTTP errors/timeouts. Never exposes the key or raw upstream error details.
+- **Server endpoints**: protected by existing Nitro auth middleware (returns 401 for unauthenticated requests). Translate `SandboxApiError` to safe generic messages (`Upstream service error`, `Service unavailable`).
+- **Frontend page**: uses `useFetch('/api/soldouts/today')` with SSR. Shows loading skeleton, empty state, error state, and data cards with merchant name, deal name, sold-out time, category, region/city, cap, rep name, DNC badge, posted-in-channel badge.
+
+### Validation Results (T2)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 48/48 passed (5 test files, 18 new tests) |
+| `npm run build` | ✅ 2.4 MB, all 3 new API routes in output |
+
+### Manual Integration Test Results
+
+| Test | Result |
+|---|---|
+| `GET /api/soldouts/today` unauthenticated | ✅ 401 |
+| Login with correct credentials | ✅ 200 `{ ok: true }` |
+| `GET /api/soldouts/today` authenticated | ✅ Returns live sandbox data (43 sold-outs, `world_day: d1`, `date: 2026-11-10`) |
+| Sandbox `GET /merchants?limit=2` | ✅ 3000 total merchants, pagination cursor returned |
+| Sandbox `GET /deals?merchant_id=M11395` | ✅ 2 deals returned with `sold_out_count`, `last_cap` |
+| API key not exposed in browser response | ✅ Confirmed (no `gsk_` prefix in any response) |
+| Logout | ✅ 200 `{ ok: true }` |
+| `GET /api/soldouts/today` after logout | ✅ 401 |
+
+### Known Limitations
+
+- **Windows SSL cert revocation** (`CRYPT_E_NO_REVOCATION_CHECK`): Windows curl requires `-k` for the Railway HTTPS endpoint. The Node.js `fetch` in the actual server works fine as Node does not use the Windows CryptoAPI cert revocation check.
+- **No auto-refresh**: The sold-outs page does not auto-refresh. The user must reload manually to see new sold-outs.
+- **No pagination UI**: The page fetches the first page (default limit) only. No "load more" button yet.
+- **Date on sandbox**: The sandbox uses a fixed demo date (`2026-11-10`) rather than today's real date — this is expected sandbox behaviour.
+- **`team_time` on `TodaySoldOut` items**: Each sold-out item also has `team_time` and `world_day` fields (redundant with the response root fields) — interface matches the actual schema.
+
+### Deviations from Requirements
+
+- None. All 10 implementation requirements fulfilled.
+- No additional npm dependencies added (uses native Node.js `fetch` and existing Nuxt/H3 utilities).
+
+---
+
 ## Next Task
 
-**T2** — pending explicit approval.
+**T3** — pending explicit approval.
