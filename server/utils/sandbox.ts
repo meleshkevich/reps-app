@@ -58,6 +58,25 @@ export interface SoldOutsTodayResponse extends PaginatedResponse<TodaySoldOut> {
   team_time: string
 }
 
+export interface Mark {
+  merchant_id: string
+  mark: string
+  reason: string
+  marked_by: string
+  marked_at: string
+  set_with: string
+}
+
+export interface MarksResponse {
+  data: Mark[]
+}
+
+export interface DeleteMarkResponse {
+  merchant_id: string
+  removed: boolean
+  previous: Mark
+}
+
 // ---- Error class ----
 
 export class SandboxApiError extends Error {
@@ -133,4 +152,49 @@ export async function getMerchantDeals(
   params: { cursor?: string; limit?: number } = {},
 ): Promise<PaginatedResponse<Deal>> {
   return sandboxFetch<PaginatedResponse<Deal>>('/deals', { merchant_id: merchantId, ...params })
+}
+
+export async function sandboxMutate<T>(
+  method: 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const url = `${SANDBOX_BASE}${path}`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${getApiKey()}`,
+        'Content-Type': 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new SandboxApiError(res.status, `Sandbox API returned ${res.status}`)
+    return (await res.json()) as T
+  } catch (err) {
+    if (err instanceof SandboxApiError) throw err
+    if (err instanceof Error && err.name === 'AbortError')
+      throw new SandboxApiError(504, 'Sandbox API request timed out')
+    throw new SandboxApiError(502, 'Sandbox API unavailable')
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function getMarks(): Promise<MarksResponse> {
+  return sandboxFetch<MarksResponse>('/marks')
+}
+
+export async function setMerchantMark(
+  merchantId: string,
+  body: { mark: string; reason: string; marked_by: string },
+): Promise<Mark> {
+  return sandboxMutate<Mark>('PUT', `/merchants/${merchantId}/mark`, body)
+}
+
+export async function deleteMerchantMark(merchantId: string): Promise<DeleteMarkResponse> {
+  return sandboxMutate<DeleteMarkResponse>('DELETE', `/merchants/${merchantId}/mark`)
 }

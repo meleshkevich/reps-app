@@ -255,6 +255,141 @@ Schemas verified against live sandbox responses:
 
 ---
 
+---
+
+## T3 — Merchant Feedback & Marks
+
+**Status:** Complete ✅
+
+### Files Created or Modified
+
+| File | Purpose |
+|---|---|
+| `server/utils/identity.ts` | Hard-coded admin identity: `ADMIN_IDENTITY` with `displayName: 'Groupon Admin'` |
+| `server/utils/marks.ts` | `validateMarkReason()` — trims, checks non-empty, enforces 500-char limit |
+| `server/utils/sandbox.ts` | Added `Mark`, `MarksResponse`, `DeleteMarkResponse` types; `sandboxMutate()`, `getMarks()`, `setMerchantMark()`, `deleteMerchantMark()` |
+| `server/api/marks/index.get.ts` | `GET /api/marks` — proxies sandbox, auth-protected |
+| `server/api/merchants/[id]/mark.put.ts` | `PUT /api/merchants/:id/mark` — validates reason, injects `marked_by` server-side |
+| `server/api/merchants/[id]/mark.delete.ts` | `DELETE /api/merchants/:id/mark` — proxies sandbox, auth-protected |
+| `layouts/default.vue` | Added "Groupon Admin" display name in header |
+| `pages/index.vue` | Marks fetched alongside sold-outs; per-merchant mark state badge + add/edit/delete inline controls |
+| `tests/marks.test.ts` | 25 tests covering marks CRUD, validation, auth protection, error handling, actor identity |
+
+### Confirmed `marked_by` API Requirements
+
+The `/marks` API's `marked_by` field is **free-form string** (no enumeration, no rep ID constraint). The actor identity is hard-coded server-side as `'Groupon Admin'` via `ADMIN_IDENTITY.displayName`. It is never accepted from the browser.
+
+### Architecture
+
+- **Admin identity** (`server/utils/identity.ts`): Single source of truth — hard-coded constant, resolved from server context. Session payload contains only `sub: 'admin'`; no identity claims are trusted from the browser.
+- **Mark validation** (`server/utils/marks.ts`): `validateMarkReason` exported and unit-tested independently. Only `no_call` mark type is ever submitted.
+- **`sandboxMutate`**: Parallel to `sandboxFetch` — handles PUT/DELETE with JSON body, same 10 s timeout/`AbortController` pattern and `SandboxApiError` propagation.
+- **UI**: `useFetch('/api/marks')` fetched alongside sold-outs on SSR. `marksMap` computed Map keyed by `merchant_id`. Mark controls appear on first occurrence of each merchant in the sold-out list (tracked via `firstOccurrenceSoldOutIds`). Mark state badge (orange `no_call`) appears on all cards for a merchant, ensuring consistent display when multiple sold-outs share the same merchant.
+- **Prevents duplicate submissions**: `markSubmitting[merchantId]` disables all action buttons while a request is in flight.
+
+### Validation Results (T3)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 73/73 passed (6 test files, 25 new marks tests) |
+| `npm run build` | ✅ 2.42 MB, `merchants/_id/mark.delete.mjs`, `merchants/_id/mark.put.mjs` in output |
+
+### Manual Sandbox Integration Results
+
+Test merchant used: `M11395` (had no prior mark — confirmed before testing).
+
+| Step | Result |
+|---|---|
+| `GET /api/marks` unauthenticated | ✅ 401 |
+| `PUT /api/merchants/M11395/mark` unauthenticated | ✅ 401 |
+| Login | ✅ `{ ok: true }` |
+| `GET /api/marks` authenticated | ✅ `{ data: [] }` (no prior marks) |
+| Create no_call mark with reason | ✅ Returns `{ merchant_id, mark: 'no_call', marked_by: 'Groupon Admin', ... }` |
+| `GET /api/marks` after create | ✅ Mark persisted for M11395 |
+| Update reason (PUT again) | ✅ Returns updated reason, new `marked_at` |
+| Delete mark | ✅ `{ removed: true, previous: {...} }` |
+| `GET /api/marks` after delete | ✅ `{ data: [] }` — mark fully removed |
+| Empty reason rejected | ✅ 400 `{ error: 'reason is required' }` |
+| API key not in any response | ✅ Confirmed (no `gsk_` prefix in any response) |
+
+Original mark state: `M11395` had no mark before testing. Mark state fully restored (deleted after test).
+
+### Known Limitations
+
+- **No pagination on marks**: `GET /marks` returns all marks in one response. If the admin creates many marks this could grow. No pagination documented in the API spec for this endpoint.
+- **No optimistic UI**: Mark actions wait for the server round-trip + sandbox call before updating state. No optimistic update.
+- **Mark controls on first occurrence only**: If the same merchant appears in the sold-out list multiple times, mark controls show only on the first card. All cards still show the mark state badge.
+- **`sandboxMutate` sends no DELETE body**: The sandbox API accepts an optional reason body for DELETE (logged but not stored). We omit it to keep the implementation simple.
+
+### Deviations from Requirements
+
+- None. All requirements implemented.
+- No additional npm dependencies (uses native Node.js `fetch` and existing Nuxt/H3 utilities).
+
+---
+
+---
+
+## T3 UX — Minor Merchant Feedback Label Improvements
+
+**Status:** Complete ✅
+
+### Changes
+
+- Badge: `no_call` → `Do not call`
+- Existing mark details: removed `no_call` prefix, now shows `Reason: <reason>`
+- Delete button: `Remove` → `Remove mark`
+- Add button: `+ Add no_call mark` → `+ Mark as Do Not Call`
+- Form header: `Add no_call mark` / `Edit no_call reason` → `Mark as Do Not Call` / `Edit reason`
+- Textarea placeholder: `Reason for no_call...` → `Reason…`
+- Added explanatory note in the form: *"This records merchant feedback. It does not automatically remove restock tasks."*
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `pages/index.vue` | Label wording, disclaimer note in form |
+
+### Validation Results
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 73/73 passed |
+| `npm run build` | ✅ 2.42 MB, clean build |
+
+---
+
+---
+
+## T3 UX — Display Merchant Mark Author
+
+**Status:** Complete ✅
+
+### Change
+
+Added `Marked by: <value>` line below the reason in the existing-mark section of the sold-outs dashboard. Uses the `marked_by` field already present on the `Mark` interface. Hidden via `v-if` when `marked_by` is empty. Styled with `text-xs text-gray-400` consistent with surrounding muted text.
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `pages/index.vue` | Added `Marked by:` line in existing-mark template block |
+
+### Validation Results
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 73/73 passed |
+| `npm run build` | ✅ 2.42 MB, clean build |
+
+---
+
 ## Next Task
 
-**T3** — pending explicit approval.
+**T4** — pending explicit approval.

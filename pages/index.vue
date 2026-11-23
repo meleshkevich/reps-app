@@ -83,6 +83,96 @@
             >
               Posted
             </span>
+            <span
+              v-if="marksMap.get(item.merchant_id)"
+              class="bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full font-medium"
+            >
+              Do not call
+            </span>
+          </div>
+
+          <!-- Mark controls: shown once per merchant (first occurrence only) -->
+          <div
+            v-if="firstOccurrenceSoldOutIds.has(item.sold_out_id)"
+            class="mt-3 border-t border-gray-100 pt-3"
+          >
+            <!-- Edit form -->
+            <template v-if="editingMerchantId === item.merchant_id">
+              <p class="text-xs text-gray-500 mb-1.5">
+                {{ marksMap.get(item.merchant_id) ? 'Edit reason' : 'Mark as Do Not Call' }}
+              </p>
+              <textarea
+                v-model="editReason"
+                class="w-full text-sm border border-gray-300 rounded p-2 resize-none focus:outline-none focus:ring-1 focus:ring-orange-400"
+                rows="2"
+                placeholder="Reason…"
+                maxlength="500"
+              />
+              <p class="text-xs text-gray-400 mt-1">
+                This records merchant feedback. It does not automatically remove restock tasks.
+              </p>
+              <p v-if="markError[item.merchant_id]" class="text-xs text-red-600 mt-1">
+                {{ markError[item.merchant_id] }}
+              </p>
+              <div class="flex gap-2 mt-2">
+                <button
+                  class="text-xs bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 disabled:opacity-50"
+                  :disabled="!!markSubmitting[item.merchant_id]"
+                  @click="submitMark(item.merchant_id)"
+                >
+                  {{ markSubmitting[item.merchant_id] ? 'Saving…' : 'Save' }}
+                </button>
+                <button
+                  class="text-xs text-gray-500 hover:text-gray-900"
+                  @click="cancelEdit"
+                >
+                  Cancel
+                </button>
+              </div>
+            </template>
+
+            <!-- Existing mark -->
+            <template v-else-if="marksMap.get(item.merchant_id)">
+              <p class="text-xs text-gray-500 mb-0.5">
+                Reason: {{ marksMap.get(item.merchant_id)!.reason }}
+              </p>
+              <p v-if="marksMap.get(item.merchant_id)!.marked_by" class="text-xs text-gray-400 mb-1">
+                Marked by: {{ marksMap.get(item.merchant_id)!.marked_by }}
+              </p>
+              <p v-if="markError[item.merchant_id]" class="text-xs text-red-600 mb-1">
+                {{ markError[item.merchant_id] }}
+              </p>
+              <div class="flex gap-3">
+                <button
+                  class="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                  :disabled="!!markSubmitting[item.merchant_id]"
+                  @click="startEdit(item.merchant_id)"
+                >
+                  Edit reason
+                </button>
+                <button
+                  class="text-xs text-red-600 hover:underline disabled:opacity-50"
+                  :disabled="!!markSubmitting[item.merchant_id]"
+                  @click="removeMark(item.merchant_id)"
+                >
+                  {{ markSubmitting[item.merchant_id] ? 'Removing…' : 'Remove mark' }}
+                </button>
+              </div>
+            </template>
+
+            <!-- No mark -->
+            <template v-else>
+              <p v-if="markError[item.merchant_id]" class="text-xs text-red-600 mb-1">
+                {{ markError[item.merchant_id] }}
+              </p>
+              <button
+                class="text-xs text-orange-600 hover:underline disabled:opacity-50"
+                :disabled="!!markSubmitting[item.merchant_id]"
+                @click="startEdit(item.merchant_id)"
+              >
+                + Mark as Do Not Call
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -91,9 +181,80 @@
 </template>
 
 <script setup lang="ts">
-import type { SoldOutsTodayResponse } from '~/server/utils/sandbox'
+import type { SoldOutsTodayResponse, MarksResponse, Mark } from '~/server/utils/sandbox'
 
 const { data, pending, error } = await useFetch<SoldOutsTodayResponse>('/api/soldouts/today')
+const { data: marksData, refresh: refreshMarks } = await useFetch<MarksResponse>('/api/marks')
+
+const marksMap = computed(() => {
+  const map = new Map<string, Mark>()
+  for (const m of marksData.value?.data ?? []) {
+    map.set(m.merchant_id, m)
+  }
+  return map
+})
+
+// sold_out_ids of the first occurrence of each merchant — mark controls show only there
+const firstOccurrenceSoldOutIds = computed(() => {
+  const seenMerchants = new Set<string>()
+  const result = new Set<string>()
+  for (const item of data.value?.data ?? []) {
+    if (!seenMerchants.has(item.merchant_id)) {
+      result.add(item.sold_out_id)
+      seenMerchants.add(item.merchant_id)
+    }
+  }
+  return result
+})
+
+const editingMerchantId = ref<string | null>(null)
+const editReason = ref('')
+const markSubmitting = reactive<Record<string, boolean>>({})
+const markError = reactive<Record<string, string | null>>({})
+
+function startEdit(merchantId: string) {
+  editingMerchantId.value = merchantId
+  editReason.value = marksMap.value.get(merchantId)?.reason ?? ''
+  markError[merchantId] = null
+}
+
+function cancelEdit() {
+  editingMerchantId.value = null
+  editReason.value = ''
+}
+
+async function submitMark(merchantId: string) {
+  const reason = editReason.value.trim()
+  if (!reason) {
+    markError[merchantId] = 'Reason is required'
+    return
+  }
+  markSubmitting[merchantId] = true
+  markError[merchantId] = null
+  try {
+    await $fetch(`/api/merchants/${merchantId}/mark`, { method: 'PUT', body: { reason } })
+    await refreshMarks()
+    editingMerchantId.value = null
+    editReason.value = ''
+  } catch {
+    markError[merchantId] = 'Failed to save mark. Please try again.'
+  } finally {
+    markSubmitting[merchantId] = false
+  }
+}
+
+async function removeMark(merchantId: string) {
+  markSubmitting[merchantId] = true
+  markError[merchantId] = null
+  try {
+    await $fetch(`/api/merchants/${merchantId}/mark`, { method: 'DELETE' })
+    await refreshMarks()
+  } catch {
+    markError[merchantId] = 'Failed to remove mark. Please try again.'
+  } finally {
+    markSubmitting[merchantId] = false
+  }
+}
 
 function formatTime(iso: string): string {
   try {
