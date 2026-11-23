@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "^0.7.6",
+    "@types/node": "^26.6.6",
     "@vue/test-utils": "^2.4.6",
     "eslint": "^9.15.0",
     "nuxt": "^3.14.1592",
@@ -22,5 +23,11 @@
   },
   "dependencies": {
     "@nuxtjs/tailwindcss": "^6.12.2"
+  },
+  "overrides": {
+    "vite": "^7.3.6",
+    "vitest": {
+      "vite": "5.4.21"
+    }
   }
 }

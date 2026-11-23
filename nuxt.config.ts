@@ -5,5 +5,10 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', '@nuxt/eslint'],
   typescript: {
     typeCheck: true,
+    tsConfig: {
+      compilerOptions: {
+        types: ['node'],
+      },
+    },
   },
 })
