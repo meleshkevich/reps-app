@@ -677,6 +677,100 @@ Confirmed `output_config.format` approach works. Gateway also requires `addition
 
 ---
 
-## Next Task
+---
 
-No pending tasks assigned. T4 (including gateway correction) is complete.
+## T6 — Offline Holdout Measurement CLI
+
+**Status:** Complete ✅
+
+### Files Created or Modified
+
+| File | Purpose |
+|---|---|
+| `scripts/measure-holdout.ts` | CLI entry point: argument parsing, CSV loading, results formatting, process exit |
+| `scripts/lib/holdout-measurement.ts` | Pure measurement library: CSV parsing, group statistics, net GP calculation, projections |
+| `scripts/fixtures/holdout.synthetic.csv` | Synthetic demonstration dataset (not real experiment data) |
+| `tests/holdout-measurement.test.ts` | 66 tests: parsing, validation, calculation, edge cases, CLI error handling |
+| `docs/HOLDOUT_MEASUREMENT.md` | Experiment design, CSV contract, formulas, limitations |
+| `docs/HISTORICAL_FINDINGS.md` | Source of £11.08 / £14.67 / £1.58 observational differences — not uplift coefficients |
+
+### Architecture
+
+**Offline-only CLI.** No network, API keys, LLM calls, or database access.
+
+The library (`scripts/lib/holdout-measurement.ts`) is entirely pure functions with no side effects. The CLI (`scripts/measure-holdout.ts`) handles I/O: reads a CSV from disk, calls library functions, formats and prints results, then exits.
+
+### Experiment Design
+
+| Principle | Implementation |
+|---|---|
+| Randomization unit | Merchant |
+| Analysis type | Intention-to-treat (all assigned merchants regardless of rep adherence) |
+| Net GP formula | `netGP = observedGP − repTimeCost − refundAdjustment` |
+| Projection | Conditional on eligible-merchants population (optional flag) |
+
+### Usage
+
+```bash
+npm run measure:holdout -- \
+  --input scripts/fixtures/holdout.synthetic.csv \
+  --rep-hourly-cost 24 \
+  --mode synthetic \
+  --eligible-merchants 1000
+```
+
+**No actual experiment has been run.** The `--mode synthetic` flag gates output to make this explicit. Real results require a completed randomized experiment; use `--mode real` only with actual data.
+
+### Historical Findings Boundary
+
+The observational GP differences from Priya Nair's memo (£11.08 called vs. left alone; £14.67 without active automation; £1.58 with active automation) are documented in `docs/HISTORICAL_FINDINGS.md` as a historical reference. They are not used as causal uplift coefficients in the financial engine, the holdout CLI, or any calculation in this repository.
+
+### Validation Results (T6)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 258/258 passed (66 holdout tests) |
+| `npm run build` | ✅ 2.44 MB, measurement scripts excluded from Nuxt build output (offline only) |
+
+---
+
+## Final Status — Assessment Submission (2026-11-24)
+
+**All tasks complete: T0, T1, T2, T3, T4, T5, T6**
+
+| Task | Description | Status |
+|---|---|---|
+| T1 | Initialize Nuxt 3 project, tooling, CI commands | ✅ Complete |
+| T0 | Admin authentication (HMAC session, rate limit, same-origin) | ✅ Complete |
+| T2 | Groupon sandbox API integration, sold-outs dashboard | ✅ Complete |
+| T3 | Merchant feedback marks (no-call, server-side identity) | ✅ Complete |
+| T4 | Evidence-based LLM analysis with deterministic source verification | ✅ Complete |
+| T5 | Deterministic financial engine (scenario GP, recommendations) | ✅ Complete |
+| T6 | Offline holdout measurement CLI | ✅ Complete |
+
+**Final validation results:**
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 258/258 passed (10 test files, all offline) |
+| `npm run build` | ✅ 2.44 MB production output |
+
+**Security:**
+- `.env` is in `.gitignore` and has never been committed to git history.
+- `.env.example` contains only empty placeholders.
+- No API keys, passwords, or session secrets appear in any committed file or git history.
+- `marked_by` identity is hard-coded server-side — never accepted from the browser.
+- API key read from `process.env` server-side — never sent to the browser.
+- Raw merchant evidence, prompts, and credentials do not appear in logs.
+
+**Routing and financial boundaries preserved:**
+- Routing suppression is proposed but not implemented; no routing or automation settings changed.
+- No routing approval has been obtained or claimed.
+- Merchant `no_call` marks are advisory; they do not automatically suppress restock tasks.
+- Historical GP differences are not used as causal uplift coefficients.
+- No LLM-generated financial estimates; missing inputs display "Estimate unavailable."
+- No new synthetic values are represented as actual Groupon impact.
