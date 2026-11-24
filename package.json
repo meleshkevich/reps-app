@@ -8,14 +8,17 @@
     "preview": "nuxt preview",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
-    "test": "vitest run"
+    "test": "vitest run",
+    "measure:holdout": "tsx scripts/measure-holdout.ts"
   },
   "devDependencies": {
     "@nuxt/eslint": "^0.7.6",
     "@types/node": "^26.6.6",
     "@vue/test-utils": "^2.4.6",
+    "csv-parse": "^7.0.3",
     "eslint": "^9.15.0",
     "nuxt": "^3.14.1592",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8",
     "vue": "^3.5.13",

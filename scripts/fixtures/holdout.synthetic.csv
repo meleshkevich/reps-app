@@ -1,0 +1,9 @@
+merchant_id,group,size_band,gp_30d_gbp,rep_minutes,additional_refund_loss_gbp
+M001,control,A,100.00,30,0.00
+M002,control,B,80.00,25,2.00
+M003,control,C,60.00,20,0.00
+M004,control,D,40.00,15,0.00
+M005,treatment,A,110.00,15,0.00
+M006,treatment,B,85.00,10,1.00
+M007,treatment,C,65.00,10,0.00
+M008,treatment,D,45.00,5,0.00

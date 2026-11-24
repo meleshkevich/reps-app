@@ -45,6 +45,29 @@ cp .env.example .env
 
 The app is Vercel-compatible. Connect the repository to a Vercel project and set the environment variables in the Vercel dashboard. No additional configuration is required.
 
+## Holdout Measurement
+
+An offline CLI calculates observed incremental net GP from a randomized merchant-level holdout experiment.
+
+```bash
+npm run measure:holdout -- \
+  --input scripts/fixtures/holdout.synthetic.csv \
+  --rep-hourly-cost 24 \
+  --mode synthetic \
+  --eligible-merchants 1000
+```
+
+| Argument | Description |
+|---|---|
+| `--input <path>` | Experiment CSV file |
+| `--rep-hourly-cost <gbp>` | Rep hourly cost in GBP |
+| `--mode <synthetic\|real>` | `synthetic` for demonstration, `real` for actual experiment data |
+| `--eligible-merchants <n>` | Eligible rollout population for conditional projection (optional) |
+
+See [docs/HOLDOUT_MEASUREMENT.md](docs/HOLDOUT_MEASUREMENT.md) for the experiment design, CSV contract, formulas, and limitations.
+
+> No actual experiment has been run. Synthetic results are demonstrations only.
+
 ## Project Structure
 
 ```
