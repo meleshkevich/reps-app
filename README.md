@@ -6,7 +6,7 @@ A mobile-first internal decision-support tool for Groupon sales reps, built with
 
 ## Deployed Application
 
-**URL:** `https://reps-app-ecru.vercel.app/` _(verify in the Vercel dashboard if the URL differs)_
+**URL:** `https://reps-app-ecru.vercel.app/`
 
 **Login page:** `https://reps-app-ecru.vercel.app/login`  
 **Email:** `admin@groupon.com`  
