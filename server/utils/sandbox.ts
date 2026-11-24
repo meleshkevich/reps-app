@@ -198,3 +198,66 @@ export async function setMerchantMark(
 export async function deleteMerchantMark(merchantId: string): Promise<DeleteMarkResponse> {
   return sandboxMutate<DeleteMarkResponse>('DELETE', `/merchants/${merchantId}/mark`)
 }
+
+// ---- Evidence source types ----
+
+export interface RepNote {
+  note_id: string
+  merchant_id: string
+  rep_id: string | null
+  created_at: string
+  text: string
+}
+
+export interface AlertReply {
+  reply_id: string
+  merchant_id: string
+  received_at: string
+  text: string
+}
+
+export interface Review {
+  review_id: string
+  merchant_id: string
+  deal_id: string
+  created_at: string
+  rating: number
+  text: string
+}
+
+export interface Refund {
+  refund_id: string
+  merchant_id: string
+  deal_id: string
+  created_at: string
+  amount_gbp: number
+  reason_text: string
+}
+
+export async function getMerchantNotes(
+  merchantId: string,
+  params: { limit?: number; cursor?: string } = {},
+): Promise<PaginatedResponse<RepNote>> {
+  return sandboxFetch<PaginatedResponse<RepNote>>('/notes', { merchant_id: merchantId, limit: 100, ...params })
+}
+
+export async function getMerchantAlertReplies(
+  merchantId: string,
+  params: { limit?: number; cursor?: string } = {},
+): Promise<PaginatedResponse<AlertReply>> {
+  return sandboxFetch<PaginatedResponse<AlertReply>>('/alert-replies', { merchant_id: merchantId, limit: 100, ...params })
+}
+
+export async function getMerchantReviews(
+  merchantId: string,
+  params: { limit?: number; cursor?: string } = {},
+): Promise<PaginatedResponse<Review>> {
+  return sandboxFetch<PaginatedResponse<Review>>('/reviews', { merchant_id: merchantId, limit: 100, ...params })
+}
+
+export async function getMerchantRefunds(
+  merchantId: string,
+  params: { limit?: number; cursor?: string } = {},
+): Promise<PaginatedResponse<Refund>> {
+  return sandboxFetch<PaginatedResponse<Refund>>('/refunds', { merchant_id: merchantId, limit: 100, ...params })
+}

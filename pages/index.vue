@@ -91,7 +91,7 @@
             </span>
           </div>
 
-          <!-- Mark controls: shown once per merchant (first occurrence only) -->
+          <!-- Mark controls and analysis: shown once per merchant (first occurrence only) -->
           <div
             v-if="firstOccurrenceSoldOutIds.has(item.sold_out_id)"
             class="mt-3 border-t border-gray-100 pt-3"
@@ -181,6 +181,96 @@
                 + Mark as Do Not Call
               </button>
             </template>
+
+            <!-- Evidence analysis section -->
+            <div class="mt-3 pt-2 border-t border-gray-50">
+              <button
+                class="text-xs text-indigo-600 hover:underline disabled:opacity-50"
+                :disabled="analysisState[item.merchant_id] === 'loading'"
+                @click="analyzeEvidence(item.merchant_id)"
+              >
+                {{ analysisState[item.merchant_id] === 'loading' ? 'Analyzing evidence…' : 'Analyze evidence' }}
+              </button>
+
+              <!-- Analysis result -->
+              <div v-if="analysisResults[item.merchant_id]" class="mt-2">
+                <p
+                  v-if="analysisResults[item.merchant_id].status === 'no_evidence'"
+                  class="text-xs text-gray-400"
+                >
+                  No source evidence found for this merchant.
+                </p>
+                <p
+                  v-else-if="analysisResults[item.merchant_id].status === 'no_signals'"
+                  class="text-xs text-gray-400"
+                >
+                  No relevant signals found in evidence sample.
+                </p>
+                <p
+                  v-else-if="analysisResults[item.merchant_id].status === 'incomplete_evidence'"
+                  class="text-xs text-orange-600"
+                >
+                  Evidence collection incomplete — verify manually before calling.
+                </p>
+                <p
+                  v-else-if="analysisResults[item.merchant_id].status === 'llm_unavailable' || analysisResults[item.merchant_id].status === 'invalid_response'"
+                  class="text-xs text-red-600"
+                >
+                  Analysis unavailable — try again later.
+                </p>
+
+                <!-- Signals -->
+                <template v-if="analysisResults[item.merchant_id].status === 'ok'">
+                  <div
+                    v-for="(signal, si) in analysisResults[item.merchant_id].signals"
+                    :key="si"
+                    class="mt-2"
+                  >
+                    <p class="text-xs font-medium text-gray-700">{{ signalLabel(signal.type) }}</p>
+                    <div
+                      v-for="(ref, ri) in signal.evidence"
+                      :key="ri"
+                      class="mt-1 ml-2 pl-2 border-l-2 border-indigo-100"
+                    >
+                      <p class="text-xs text-gray-600 italic">"{{ ref.quote }}"</p>
+                      <p class="text-xs text-gray-400 mt-0.5">
+                        Source verified · {{ ref.sourceType }} · {{ ref.sourceId }}
+                        <span v-if="ref.timestamp"> · {{ formatDate(ref.timestamp) }}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <p class="text-xs text-gray-400 mt-2">
+                    Analyzed {{ analysisResults[item.merchant_id].samplingMeta?.totalSelected ?? 0 }} evidence records (sample, not complete history).
+                    Positive signals do not override contact restrictions.
+                  </p>
+
+                  <!-- Rep feedback (session-local only) -->
+                  <div class="flex gap-3 mt-2">
+                    <template v-if="!analysisFeedback[item.merchant_id]">
+                      <button
+                        class="text-xs text-green-600 hover:underline"
+                        @click="analysisFeedback[item.merchant_id] = 'confirmed'"
+                      >
+                        Confirm evidence
+                      </button>
+                      <button
+                        class="text-xs text-orange-600 hover:underline"
+                        @click="analysisFeedback[item.merchant_id] = 'flagged'"
+                      >
+                        Flag incorrect
+                      </button>
+                    </template>
+                    <p v-else-if="analysisFeedback[item.merchant_id] === 'confirmed'" class="text-xs text-green-600">
+                      Evidence confirmed (session only — not persisted)
+                    </p>
+                    <p v-else-if="analysisFeedback[item.merchant_id] === 'flagged'" class="text-xs text-orange-600">
+                      Evidence flagged (session only — not persisted)
+                    </p>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -192,6 +282,40 @@
 import type { SoldOutsTodayResponse, MarksResponse, Mark, TodaySoldOut } from '~/server/utils/sandbox'
 import { getRecommendation } from '~/utils/finance'
 import type { ScenarioResult } from '~/utils/finance'
+
+// ---- Analysis types ----
+
+interface AnalysisEvidenceRef {
+  sourceToken: string
+  sourceId: string
+  sourceType: string
+  merchantId: string
+  dealId: string | null
+  timestamp: string | null
+  quote: string
+}
+
+interface AnalysisSignal {
+  type: string
+  evidence: AnalysisEvidenceRef[]
+}
+
+interface AnalysisSamplingMeta {
+  totalFetched: number
+  totalSelected: number
+  bySource: Record<string, { fetched: number; selected: number; status: string }>
+}
+
+interface AnalysisResult {
+  status: string
+  signals?: AnalysisSignal[]
+  samplingMeta?: AnalysisSamplingMeta
+  model?: string
+  usage?: { input_tokens: number; output_tokens: number } | null
+  error?: string
+  issues?: string[]
+  failedSources?: string[]
+}
 
 const { data, pending, error } = await useFetch<SoldOutsTodayResponse>('/api/soldouts/today')
 const { data: marksData, refresh: refreshMarks } = await useFetch<MarksResponse>('/api/marks')
@@ -298,6 +422,53 @@ function formatTime(iso: string): string {
     return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
   } catch {
     return iso
+  }
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
+// ---- Evidence analysis ----
+
+const analysisState = reactive<Record<string, 'idle' | 'loading' | 'done' | 'error'>>({})
+const analysisResults = reactive<Record<string, AnalysisResult>>({})
+const analysisFeedback = reactive<Record<string, 'confirmed' | 'flagged' | null>>({})
+
+const SIGNAL_LABELS: Record<string, string> = {
+  restock_intent: 'Restock intent',
+  restock_refusal: 'Restock refusal',
+  callback_requested: 'Callback requested',
+  capacity_risk: 'Capacity risk',
+  refund_risk: 'Refund risk',
+  contact_restriction: 'Contact restriction',
+  automation_mentioned: 'Automation mentioned',
+  other_relevant: 'Other relevant',
+}
+
+function signalLabel(type: string): string {
+  return SIGNAL_LABELS[type] ?? type
+}
+
+async function analyzeEvidence(merchantId: string) {
+  if (analysisState[merchantId] === 'loading') return
+  analysisState[merchantId] = 'loading'
+  analysisFeedback[merchantId] = null
+  try {
+    const result = await $fetch<AnalysisResult>('/api/analyze-merchant', {
+      method: 'POST',
+      body: { merchantId },
+      ignoreResponseError: true,
+    })
+    analysisResults[merchantId] = result
+    analysisState[merchantId] = 'done'
+  } catch {
+    analysisResults[merchantId] = { status: 'llm_unavailable' }
+    analysisState[merchantId] = 'done'
   }
 }
 </script>

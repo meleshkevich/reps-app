@@ -513,6 +513,170 @@ PROJECT_STATE.md corrected: the sandbox provides historical financial and operat
 
 ---
 
+---
+
+---
+
+## T4 — Evidence-Based LLM Merchant Analysis
+
+**Status:** Complete ✅
+
+### Files Created or Modified
+
+| File | Purpose |
+|---|---|
+| `utils/evidence.ts` | Pure TypeScript: `EvidenceRecord`, `EvidenceTokenMap`, `buildEvidenceTokenMap`, `validateAndResolveEvidence`, signal types |
+| `server/utils/sandbox.ts` | Added `RepNote`, `AlertReply`, `Review`, `Refund` types and fetch helpers for all 4 evidence endpoints |
+| `server/utils/evidenceCollector.ts` | Evidence collection from sandbox: normalization, ownership verification, deduplication, bounded selection |
+| `server/utils/llmGateway.ts` | LLM gateway integration: single call, `tool_choice` for structured output, timeout, error handling |
+| `server/api/analyze-merchant.post.ts` | POST `/api/analyze-merchant` — authenticated, full pipeline |
+| `pages/index.vue` | Added "Analyze evidence" button, signal display, source-verified quotes, session-local rep feedback |
+| `tests/evidence.test.ts` | 44 tests: token mapping, validation, fail-closed behavior |
+| `docs/LLM_EVIDENCE.md` | Architecture, source-token pattern, examples, cost controls, limitations |
+
+### Architecture
+
+**Pipeline:** Dashboard action → authenticated POST `/api/analyze-merchant` → merchant deal retrieval → 4-source evidence collection → normalization and ownership verification → bounded selection → request-scoped token map → LLM call with native structured JSON output → text block parsing → deterministic validation → canonical resolution → signals with verified quotes → rep feedback.
+
+**Source-token pattern:** Short tokens (`NOTE_1`, `ALERT_2`, `REVIEW_1`, `REFUND_1`) replace canonical IDs in model input. The model may generate invalid source tokens, but deterministic application validation prevents invalid references and unsupported quotes from being accepted as source-verified evidence. Every cited token is validated against the request-local map; every quote is verified as a case-sensitive substring of the original source text. Canonical metadata is resolved from the map, never from model output.
+
+**Fail-closed:** Any validation failure rejects the entire analysis. Partially validated signals are never exposed.
+
+### Evidence Sources
+
+| Source | Sandbox endpoint | Schema |
+|---|---|---|
+| Rep notes | `GET /notes?merchant_id=...` | `note_id`, `merchant_id`, `rep_id`, `created_at`, `text` |
+| Merchant alert replies | `GET /alert-replies?merchant_id=...` | `reply_id`, `merchant_id`, `received_at`, `text` |
+| Customer reviews | `GET /reviews?merchant_id=...` | `review_id`, `merchant_id`, `deal_id`, `created_at`, `rating`, `text` |
+| Refunds | `GET /refunds?merchant_id=...` | `refund_id`, `merchant_id`, `deal_id`, `created_at`, `amount_gbp`, `reason_text` |
+
+### Sampling Limits
+
+| Limit | Value |
+|---|---|
+| Max records per category | 10 |
+| Max records total | 40 |
+| Max evidence characters total | 20,000 |
+
+### Supported Signal Types
+
+`restock_intent`, `restock_refusal`, `callback_requested`, `capacity_risk`, `refund_risk`, `contact_restriction`, `automation_mentioned`, `other_relevant`
+
+### Endpoint Result States
+
+| Status | Meaning |
+|---|---|
+| `ok` | Validated signals with verified quotes |
+| `no_evidence` | All sources retrieved but no usable records |
+| `no_signals` | Valid LLM response with empty signals array |
+| `incomplete_evidence` | One or more sources failed to retrieve (HTTP 206) |
+| `llm_unavailable` | LLM call failed or timed out (HTTP 502) |
+| `invalid_response` | Validation rejected the LLM output (HTTP 502) |
+
+### LLM Configuration
+
+| Setting | Value |
+|---|---|
+| Model | `claude-haiku-5-5` |
+| Endpoint | `POST /llm/v1/messages` (gateway) |
+| Max output tokens | 2,048 |
+| Timeout | 30 seconds |
+| Structured output | `output_config: { format: { type: 'json_schema', schema: {...} } }` (native structured JSON) |
+| Retries | None — single call, fail-closed |
+
+### Validation Results (T4 — original)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 234/234 passed (44 new evidence tests) |
+| `npm run build` | ✅ 2.44 MB, `api/analyze-merchant.post.mjs` in output |
+
+### Financial and Operational Boundaries Preserved
+
+- Existing T3 no-call marks, DNC flags, and financial engine are unchanged.
+- Positive LLM signals cannot override contact restrictions.
+- `hasActiveAutoReplenish` remains `null` (unknown) for all merchants — automation mentions in evidence do not establish an active schedule.
+- No LLM-generated financial estimates. Missing inputs continue to display "Estimate unavailable."
+- Historical £11.08, £14.67, £1.58 figures not used anywhere.
+
+### Gateway Smoke Test
+
+Performed during T4 correction (2026-11-24). See `docs/LLM_EVIDENCE.md` for the full record.
+
+**Merchant:** M10001 (Bright Skin & Spa) — 5 notes + 5 alert-replies  
+**Model:** `claude-haiku-5-5` | **Stop reason:** `end_turn` | **Usage:** 943 input, 210 output tokens  
+**Result:** 4 signals extracted (`capacity_risk`, `restock_refusal`, `contact_restriction`, `callback_requested`) — all with verified verbatim quotes
+
+### Known Limitations and Deliberate Cuts
+
+- Pagination limited to first page (up to 100 records per source, bounded to 10 per category).
+- Merchants with more than 100 deals: deal ownership verification uses only the first 100 deals.
+- Semantic correctness is not verified — quote verification establishes reference integrity only.
+- Session-local rep feedback is not persisted.
+- No multi-step reasoning, RAG, or automated repair.
+- `nuxt typecheck` does not check `server/utils/evidenceCollector.ts` or `server/utils/llmGateway.ts` directly — Vitest covers them at build time.
+
+---
+
+---
+
+## T4 — Gateway Compatibility Correction
+
+**Status:** Complete ✅ (2026-11-24)
+
+### Changes
+
+**1. Gateway request rewritten** (`server/utils/llmGateway.ts`)
+
+Replaced `tools: [SIGNAL_TOOL]` + `tool_choice: { type: 'tool', name: 'report_signals' }` (HTTP 400 on `claude-haiku-5-5`) with native structured JSON output:
+- `thinking: { type: 'disabled' }`
+- `output_config: { format: { type: 'json_schema', schema: { additionalProperties: false, ... } } }`
+- Gateway-specific constraint: `additionalProperties: false` required on all schema object types
+- Response: check `stop_reason === 'end_turn'`, find text block, `JSON.parse(block.text)`
+- System prompt updated: removed "Call the report_signals tool" language, replaced with JSON output instruction
+
+**2. Gateway tests added** (`tests/llmGateway.test.ts`)
+
+27 mocked tests covering:
+- Request shape: `output_config.format` present, `tools`/`tool_choice` absent, `thinking: disabled`, correct model, evidence tokens in messages, auth header, signal enum
+- Successful parsing: valid response, empty signals, usage metadata
+- Malformed/incomplete: `stop_reason !== end_turn`, missing text block, invalid JSON, empty text, truncated JSON
+- HTTP failures: 400, 402 (budget), 429 (rate limit), 500
+- Timeout: `AbortError` → `timed out` message
+- No retries: `fetch` called exactly once on failure, network error, bad response
+- Empty evidence guard: no `fetch` call when token map is empty
+
+**3. Documentation corrected** (`docs/LLM_EVIDENCE.md`)
+
+Replaced "The source-token pattern prevents fabricated source IDs" with the accurate claim: "The model may generate invalid source tokens, but deterministic application validation prevents invalid references and unsupported quotes from being accepted as source-verified evidence."
+
+**4. Real gateway smoke test** (see Gateway Smoke Test section in T4 above)
+
+Confirmed `output_config.format` approach works. Gateway also requires `additionalProperties: false` on all schema object types (discovered via actual 400 error; fixed before tests were written).
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `server/utils/llmGateway.ts` | Rewrote request to use `output_config.format`; updated system prompt; updated response parsing |
+| `tests/llmGateway.test.ts` | Created — 27 mocked gateway tests |
+| `docs/LLM_EVIDENCE.md` | Corrected terminology; added smoke test results; updated status |
+| `PROJECT_STATE.md` | This update |
+
+### Validation Results (T4 Correction)
+
+| Command | Result |
+|---|---|
+| `npm run lint` | ✅ No errors |
+| `npm run typecheck` | ✅ No type errors |
+| `npm run test` | ✅ 258/258 passed (234 existing + 24 new gateway tests) |
+| `npm run build` | ✅ 2.44 MB, `api/analyze-merchant.post.mjs` in output |
+
+---
+
 ## Next Task
 
-**T4** — pending explicit approval.
+No pending tasks assigned. T4 (including gateway correction) is complete.
