@@ -211,3 +211,20 @@ npm run test
 | [docs/HOLDOUT_MEASUREMENT.md](docs/HOLDOUT_MEASUREMENT.md) | Holdout experiment design, CSV contract, measurement formulas |
 | [docs/HISTORICAL_FINDINGS.md](docs/HISTORICAL_FINDINGS.md) | Observational GP differences from prior analysis — not uplift coefficients |
 | [PROJECT_STATE.md](PROJECT_STATE.md) | Detailed per-task implementation notes, validation results, known limitations |
+
+## Groupon AI Builder — Final Time Log
+
+| Activity | Time |
+|---|---:|
+| Brief, API, data pack, stakeholder questions | 30 min |
+| Stakeholder responses | 10 min |
+| Focused historical analysis | 15 min |
+| Schedule-join audit | 10 min |
+| Strategy/analysis follow-up | 5 min |
+| T1–T2 — Initial Development | 20 min |
+| T3 — Merchant Feedback | 25 min |
+| T5 — GP Estimation & Recommendation Engine | 20 min |
+| T6 — Holdout Measurement | 15 min |
+| T4 — LLM Evidence Analysis | 20 min |
+| Submission materials and delivery | 10 min |
+| **Total active work** | **180 min (3 hours)** |
